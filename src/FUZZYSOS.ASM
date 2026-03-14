@@ -1,0 +1,76 @@
+; FuzzyBASIC for S-OS SWORD
+; S-OS版ヘッダ: $3000から配置
+
+BEGIN_SOS	EQU	1		; S-OS版フラグ（SOSCALL/SOSDISK/SOSWORKをincludeしない）
+BEGIN		EQU	$3000
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; S-OS システムコール (ジャンプテーブル)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+SOS.MON		EQU	$1F8E
+SOS.FPRNT	EQU	$1F9D
+SOS.FILE	EQU	$1FA3
+SOS.RDD		EQU	$1FA6
+SOS.WRD		EQU	$1FAC
+SOS.WOPEN	EQU	$1FAF
+SOS.HEX		EQU	$1FB8
+SOS.ASC		EQU	$1FBB
+SOS.BELL	EQU	$1FC4
+SOS.PAUSE	EQU	$1FC7
+SOS.INKEY	EQU	$1FCA
+SOS.BRKEY	EQU	$1FCD
+SOS.MPRNT	EQU	$1FE2
+SOS.MSX		EQU	$1FE5
+SOS._NL		EQU	$1FEB
+SOS.LTNL	EQU	$1FEE
+SOS._PRINT	EQU	$1FF4
+SOS.VER		EQU	$1FF7
+SOS.HOT		EQU	$1FFA
+SOS.BOOT	EQU	$1FFD
+SOS.DRDSB	EQU	$2000
+SOS.DWTSB	EQU	$2003
+SOS.DIR		EQU	$2006
+SOS.ROPEN	EQU	$2009
+SOS._SET	EQU	$200C
+SOS._RESET	EQU	$200F
+SOS.NAME	EQU	$2012
+SOS.KILL	EQU	$2015
+SOS._CSR	EQU	$2018
+SOS._SCRN	EQU	$201B
+SOS._LOC	EQU	$201E
+SOS._FLGET	EQU	$2021
+SOS.RDVSW	EQU	$2024
+SOS.SDVSW	EQU	$2027
+SOS.WIDCH	EQU	$2030
+SOS.ERROR	EQU	$2033
+SOS._GETKY	EQU	$1FD0
+SOS._GETL	EQU	$1FD3
+SOS.LPTOF	EQU	$1FD6
+SOS.LPTON	EQU	$1FD9
+SOS.LPRNT	EQU	$1FDC
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; S-OS ワークエリア
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+SOS.WIDTH	EQU	$1F5C
+SOS.AT_WIDTH	EQU	$1F5C
+SOS.DSK		EQU	$1F5D
+SOS.MEMAX	EQU	$1F6A
+SOS.STADR	EQU	$1F6C
+SOS.EXADR	EQU	$1F6E
+SOS.DTADR	EQU	$1F70
+SOS.SIZE	EQU	$1F72
+SOS._KBFAD	EQU	$1F76
+SOS.LPSW	EQU	$1F7C
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; メイン
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+include	"FUZZY.ASM"
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; S-OS版追加ワーク (バイナリ末尾に配置)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+SOS.WBOOTBK:	DW	0		; ウォームブートベクタ退避
+SOS.AT_COLORF:	DB	$07		; テキストカラー
+

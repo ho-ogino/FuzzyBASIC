@@ -1,0 +1,12 @@
+# Build outputs
+/out/
+/dist/
+/__pycache__/
+*.pyc
+
+# Disk deployment work area
+/disk/work/*
+!/disk/work/README.md
+
+# macOS
+.DS_Store

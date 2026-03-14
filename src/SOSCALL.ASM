@@ -1,0 +1,1686 @@
+
+[SOS]
+
+IOCSWIDTH EQU 1
+
+; LSX-Dodgers Calls
+_CONOUT	EQU	$02
+_DIRIO	EQU	$06
+_DIRIN	EQU	$07
+_BUFIN	EQU	$0A
+_CONST	EQU	$0B
+_SELDSK	EQU	$0E
+_FOPEN	EQU	$0F
+_FCLOSE	EQU	$10
+_SFIRST EQU	$11
+_SNEXT	EQU	$12
+_FDEL	EQU	$13
+_RDSEQ	EQU	$14
+_FMAKE	EQU	$16
+_FREN	EQU	$17
+_CURDRV	EQU	$19
+_SETDTA	EQU	$1A
+_FSIZE	EQU	$23
+_WRBLK	EQU	$26
+_RDBLK	EQU	$27
+_CHKFN	EQU	$29
+_RDABS	EQU	$2F
+_WRABS	EQU	$30
+BDOS	EQU	$0005
+
+MEMAX	EQU	$0006
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; 独自実装部分
+
+RESTORE_BIOS18:
+	LD	A,(BIOS18BK)
+	OR	A
+	RET	Z
+	LD	(00018H),A
+	RET
+
+; とりあえずOSに戻る
+HOT:
+	CALL	RESTORE_BIOS18
+	; ウォームブートアドレス復帰
+	LD	HL,(WBOOTBK)
+	LD	(00001H),HL
+	JP	$0000
+
+
+; TODO モニタに移行せずシェルに戻る(うーん)
+MON:
+	JP	0
+	RET
+
+; バージョン怪しい
+VER:
+	LD	HL,$2220
+	RET
+
+; エラーを表示
+ERROR:
+	DEC	A
+	CP	14
+	JR	C,ERROR1
+	INC	A
+	LD	DE,ER15
+	PUSH	AF
+	CALL	MSG
+	LD	A,'$'	;１６進数ヘッダ
+	CALL	PRINT
+	POP	AF
+	CALL	PRTHX
+	JR	ERROR2
+ERROR1:	LD	HL,MESTBL
+	ADD	A,A
+	LD	E,A
+	LD	D,0
+	ADD	HL,DE
+	LD	E,(HL)
+	INC	HL
+	LD	D,(HL)
+	CALL	MSG
+ERROR2:	CALL	BELL
+	CALL	NL
+
+	RET
+
+PRTHX:
+	PUSH	AF
+	RLCA
+	RLCA
+	RLCA
+	RLCA		;上位
+	CALL	ASC
+	CALL	_PRINT
+	POP	AF	;下位
+	CALL	ASC
+	CALL	_PRINT
+	OR	A	;ＣＹ←０
+	RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; from L-os Angeles
+
+SYSTEM:
+	EXX
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	PUSH	IX
+	PUSH	IY
+	EXX
+	CALL	$0005
+	EXX
+	POP	IY
+	POP	IX
+	POP	HL
+	POP	DE
+	POP	BC
+	EXX
+	RET
+
+MSG:
+	PUSH	HL
+	LD	H,$0D
+	JR	MSG1
+
+MSX:
+	PUSH	HL
+	LD	H,0
+MSG1:
+	PUSH	AF
+	PUSH	DE
+MSX1:
+	LD	A,(DE)
+	CP	H
+	JR	Z,MSX2
+	CALL	_PRINT
+	INC	DE
+	JR	MSX1
+MSX2:
+	POP	DE
+	POP	AF
+	POP	HL
+	RET
+
+LPTOF:
+	RET
+
+LPTON:
+	RET
+
+WIDCH:
+#IF exists IOCSWIDTH
+	CALL	IOCS_WIDCH
+#ENDIF
+	CP	41
+	JR	NC,WIDCH1
+	LD	A,40
+	JR	WIDCH2
+;
+WIDCH1:
+	LD	A,80
+WIDCH2:
+	LD	(_WIDTH),A
+	XOR	A
+	RET
+
+
+_MPRNT:
+MPRNT:
+	EX	(SP),HL
+MPRNT1:
+	LD	A,(HL)
+	INC	HL
+	OR	A
+	CALL	NZ,_PRINT
+	OR	A
+	JR	NZ,MPRNT1
+	EX	(SP),HL
+	RET
+_NL:
+NL:
+	PUSH	AF
+	LD	A,(XYADR)
+	OR	A
+	JR	Z,NLX
+	CALL	ZPRINT
+	DB	$0D,$0A,0
+	CALL	PCLR
+	CALL	NEWLINE		; CSRNY++, LINTTB更新
+NLX:
+	POP	AF
+	RET
+
+PRINTS:
+	PUSH	AF
+	LD	A,$20
+LTNL1:
+	CALL	_PRINT
+	POP	AF
+	RET
+;
+LTNL:
+	PUSH	AF
+	LD	A,$0D
+	JR	LTNL1
+
+_CSR:
+CSR:
+	; H=Y行, L=X列
+	LD	A,(XYADR)
+	LD	L,A
+	LD	A,(CSRNY)
+	LD	H,A
+	RET
+_SCRN:
+SCRN:
+	; 入力: H=行, L=列  出力: A=文字 (CY=0)
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	CALL	LOC1_LOCAL
+	CALL	GETCHR_LOCAL
+	CALL	VRAM2ASCII
+	POP	HL
+	POP	DE
+	POP	BC
+	OR	A		; CY=0 (正常終了)
+	RET
+
+_LOC:
+LOC:
+	; 入力: H=Y行, L=X列
+	LD	A,L
+	LD	(XYADR),A
+	LD	A,H
+	LD	(CSRNY),A
+	; ESC Yシーケンス出力
+	LD	A,H
+	ADD	A,$20
+	LD	(LOCY),A
+	LD	A,L
+	ADD	A,$20
+	LD	(LOCX),A
+	CALL	ZPRINT
+	DB	$1B,"Y"
+LOCY:	DB	$20
+LOCX:	DB	$20
+	DB	0
+	AND	A		;CF=0
+	RET
+
+PAUSE:
+	CALL	_BRKEY
+	JR	Z,PAUSE2
+	CP	$20
+	JR	NZ,PAUSE1
+;
+NULL:
+	CALL	_GETKY
+	OR	A
+	JR	NZ,NULL
+	CALL	_INKEY
+	CALL	BRKEY1
+	JR	Z,PAUSE2
+;
+PAUSE1:
+	EX	(SP),HL
+	INC	HL
+	INC	HL
+	EX	(SP),HL
+	RET
+;
+PAUSE2:
+	EX	(SP),HL
+	LD	A,(HL)
+	INC	HL
+	LD	H,(HL)
+	LD	L,A
+	EX	(SP),HL
+	RET
+
+_BRKEY:
+BRKEY:
+	CALL	_GETKY
+BRKEY1:
+	CP	$1B
+	RET	Z
+	CP	3
+	RET	Z
+	; Break以外の文字はプッシュバック
+	OR	A
+	JR	Z,.BRK_NOKEY
+	LD	(KEYPB),A
+	OR	A		; NZ（Breakでない）, A=キー文字を維持
+	RET
+.BRK_NOKEY
+	OR	$FF		; NZ（Breakでない）
+	RET
+HEX:
+	CALL	_CAP
+	SUB	$30
+	RET	C
+	CP	$0A
+	CCF
+	RET	NC
+	CP	$11
+	RET	C
+	SUB	7
+	CP	$10
+	CCF
+	RET
+_CAP:
+CAP:
+	CP	"a"
+	RET	C
+	CP	"z"+1
+	RET	NC
+	SUB	$20
+	RET
+
+
+ZPRINT:
+	EX	(SP),HL
+ZPRNT1:
+	LD	A,(HL)
+	INC	HL
+	OR	A
+	JR	Z,ZPRNT2
+	CALL	ZPRNT3
+	JR	ZPRNT1
+ZPRNT2:
+	EX	(SP),HL
+	RET
+;
+ZPRNT3:
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	LD	E,A
+	LD	C,$06		;INPOUT
+	CALL	SYSTEM
+	POP	HL
+	POP	DE
+	POP	BC
+	RET
+
+BELL:
+	PUSH	AF
+	LD	A,7
+	JR	PRNT01
+;
+PRNT0:
+	PUSH	AF
+	CP	$20
+	JR	NC,PRNT01
+	LD	A,$20
+PRNT01:
+	CALL	PRINT
+	POP	AF
+	RET
+
+_GETL:
+GETL:
+	PUSH	BC
+	PUSH	HL
+	PUSH	DE
+
+	;----------------
+	;Breakを抑制
+	LD	HL,ZGETLBRK
+	LD	(00001H),HL
+	LD	(SPBK),SP
+	;----------------
+
+	; INSFLGクリア
+	XOR	A
+	LD	(INSFLG),A
+
+	CALL	FGETL
+	JR	NC,ZGETL_CR
+
+	CALL	_KYBFC
+
+	; 1文字ループ（BDOS $0A の代替）
+ZGETL_LOOP:
+	CALL	_FLGET
+	CP	$0D
+	JR	Z,ZGETL_CR
+	CP	$03
+	JR	Z,ZGETL_BRK
+	CP	$1B
+	JR	Z,ZGETL_BRK
+	CP	$09
+	JR	Z,ZGETL_TAB
+	CP	$11		; Ctrl+Q = INSERT toggle
+	JR	Z,ZGETL_INS
+	CP	$7F		; DEL
+	JR	Z,ZGETL_DEL
+	; 通常文字: INSERTモード処理 → PRINT
+	CALL	GTINS_LOCAL
+	CALL	PRINT
+	JR	ZGETL_LOOP
+
+ZGETL_TAB:
+	; TABをスペース展開
+	LD	A,(XYADR)
+	AND	7
+	LD	B,A
+	LD	A,8
+	SUB	B
+	LD	B,A
+.ZGTAB_LP
+	LD	A,$20
+	CALL	GTINS_LOCAL
+	CALL	PRINT
+	DJNZ	.ZGTAB_LP
+	JR	ZGETL_LOOP
+
+ZGETL_INS:
+	; INSERTモード トグル
+	LD	HL,INSFLG
+	LD	A,(HL)
+	CPL
+	LD	(HL),A
+	JR	ZGETL_LOOP
+
+ZGETL_DEL:
+	; DELキー: カーソル位置の文字を削除
+	; 簡易実装: カーソル〜論理行末尾を左シフト、末尾にスペース
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	; カーソルofs
+	LD	A,(CSRNY)
+	LD	H,A
+	LD	A,(XYADR)
+	LD	L,A
+	CALL	LOC1_LOCAL	; HL = カーソルofs
+	PUSH	HL
+	; 論理行末尾ofs
+	CALL	GETLNL_LOCAL	; A = 末尾+1行番号
+	LD	H,A
+	LD	L,0
+	CALL	LOC1_LOCAL	; HL = 末尾+1行先頭
+	DEC	HL		; HL = 末尾ofs
+	EX	DE,HL		; DE = 末尾ofs
+	POP	HL		; HL = カーソルofs（=開始）
+	; VRAM左シフト
+	CALL	VSHIFT_LEFT
+	; 末尾にスペース
+	EX	DE,HL		; HL = 末尾ofs
+	LD	A,$20
+	CALL	PUTCHR_LOCAL
+	POP	HL
+	POP	DE
+	POP	BC
+	JR	ZGETL_LOOP
+
+ZGETL_BRK:
+	; ブレーク
+	JR	ZGETL_BRKX
+
+	;----------------
+	;Break押されて飛んできたのでSPを戻す
+ZGETLBRK:
+	LD	HL,(SPBK)
+	LD	SP,HL
+	;----------------
+ZGETL_BRKX:
+	POP	DE
+	PUSH	DE
+	LD	A,$1B
+	LD	(DE),A
+	INC	DE
+	XOR	A
+	LD	(DE),A
+	JR	ZGETL_EXIT
+
+ZGETL_CR:
+	; CR: VRAMから論理行を読み取り
+	POP	DE
+	PUSH	DE
+	CALL	INPUTL_LOCAL	; DE = バッファに論理行内容
+
+ZGETL_EXIT:
+	; INSFLGクリア
+	XOR	A
+	LD	(INSFLG),A
+
+	POP	DE
+	POP	HL
+	POP	BC
+	LD	A,$0D
+	JP	PRINT
+
+;
+FGETL:
+	CALL	FGETL1
+	RET	C
+;
+	LD	HL,$0D00
+	LD	(KBFAD1),HL
+	RET
+;
+FGETL1:
+	CALL	_BRKEY
+	SCF
+	RET	Z
+	CALL	INKBF
+;
+	CP	$0D
+	RET	Z
+	CP	$0A
+	JR	Z,FGETL1
+;
+	OR	A
+	SCF
+	RET	Z
+	CP	$1A
+	SCF
+	RET	Z
+;
+	CP	$09
+	JR	NZ,FGETL2
+	LD	A,$20
+FGETL2:
+	CALL	PRINT
+	JR	FGETL1
+
+;
+INKBF:
+	PUSH	HL
+	LD	HL,(SUBPS)
+	LD	A,H
+	XOR	L
+	JR	Z,INKBF1
+	LD	A,H
+	INC	A
+	LD	(SUBPS+1),A
+	LD	L,A
+	LD	H,SUBBF/256
+	LD	A,(HL)
+	SCF
+INKBF1:
+	POP	HL
+	RET
+;
+ASC:
+	AND	$0F
+	OR	$30
+	CP	$3A
+	RET	C
+	ADD	A,7
+	RET
+
+_GETKY:
+GETKY:
+	LD	A,(KEYPB)
+	OR	A
+	JR	Z,.GK_BDOS
+	; プッシュバックバッファから返す
+	PUSH	HL
+	LD	HL,KEYPB
+	LD	(HL),0
+	POP	HL
+	AND	A		; NZ（文字あり）
+	RET
+.GK_BDOS
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	LD	E,$FF
+	LD	C,$06		;INPOUT
+	JR	GETKY1
+;
+_FLGET:
+FLGET:
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	LD	C,$07		;INKEY
+GETKY1:
+	CALL	SYSTEM
+	POP	HL
+	POP	DE
+	POP	BC
+XFLGET:	CP	4
+	JR	NZ,FL1
+	LD	A,$1C
+	RET
+FL1:
+	CP	5
+	JR	NZ,FL2
+	LD	A,$1E
+	RET
+FL2:
+	CP	$13
+	JR	NZ,FL3
+	LD	A,$1D
+	RET
+FL3:
+	CP	$18
+	JR	NZ,FL4
+	LD	A,$1F
+	RET
+FL4:
+	AND	A
+	RET
+
+_INKEY:
+INKEY:
+	CALL	_GETKY
+	OR	A
+	JR	Z,INKEY
+	RET
+
+LPRNT:
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	LD	E,A
+	LD	C,$05		;PRNOUT
+	CALL	SYSTEM
+	POP	HL
+	POP	DE
+	POP	BC
+	ADD	A,$01
+	RET
+
+_KYBFC:
+KYBFC:
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	LD	HL,0
+	LD	(SUBPS),HL
+	LD	A,L		; A=0
+	LD	(KEYPB),A	; KEYPBクリア
+KEYBC1:
+	LD	E,$FF
+	LD	C,$06
+	CALL	SYSTEM
+	OR	A
+	JR	NZ,KEYBC1
+;
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+
+_PRINT:
+PRINT:
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	PUSH	AF
+	LD	E,A
+	CP	$20
+	JR	C,CTRL
+PRINT1:
+	LD	HL,(XYADR)
+	LD	H,0
+	LD	A,(AT_WIDTH)
+	LD	B,A
+	LD	A,L
+	SUB	B
+	JR	C,PR1
+	; 折り返し発生
+	LD	L,0
+	CALL	WRAP_LINE
+PR1:
+	INC	L
+	LD	(XYADR),HL
+	DEC	L
+	LD	BC,PRBF
+	ADD	HL,BC
+	LD	(HL),E
+;
+PRINT2:
+	LD	C,$06		; INPOUT ($FF is special: console input)
+	LD	A,E
+	INC	A
+	JR	NZ,.PRINT_BDOS
+	LD	C,_CONOUT
+.PRINT_BDOS
+	CALL	SYSTEM
+PRINT3:
+	POP	AF
+	POP	HL
+	POP	DE
+	POP	BC
+	AND	A
+	RET
+
+PCLR:
+	XOR	A
+	LD	(XYADR),A
+	RET
+;
+CTRL:
+	CP	$0D
+	JR	Z,CTRL_M
+	CP	7
+	JR	Z,PRINT2
+	CP	$0C
+	JR	Z,CTRL_L
+	CP	$1A
+	JR	Z,CTRL_Z
+	CP	$0B
+	JR	Z,CTRL_K
+	CP	$08
+	JR	Z,CTRL_H
+	CP	$0A
+	JP	Z,CTRL_J
+	CP	9
+	JP	Z,CTRL_I
+	CP	$1E
+	JP	Z,CTRL_CUR_U
+	CP	$1F
+	JP	Z,CTRL_CUR_D
+	CP	$1C
+	JP	Z,CTRL_CUR_R
+	CP	$1D
+	JP	Z,CTRL_CUR_L
+	JR	PRINT3
+CTRL_M:
+	; CR: X=0, Y++, LINTTB[Y]=$00, 出力
+	CALL	PCLR
+	CALL	NEWLINE
+	LD	C,$06		;INPOUT
+	CALL	SYSTEM
+	LD	E,$0A		;CRLF
+	JR	PRINT2
+CTRL_L:
+	; CLS: Y=0, CLR_LINTTB
+	CALL	PCLR
+	CALL	CLR_LINTTB
+	XOR	A
+	LD	(CSRNY),A
+	CALL	ZPRINT
+CTLX1:	DB	$1B,"E",0
+	JR	PRINT3
+CTRL_Z:
+	CALL	ZPRINT
+CTZX1:	DB	$1B,"J",0
+	JR	PRINT3
+CTRL_K:
+	; HOME: X=0, Y=0
+	CALL	PCLR
+	XOR	A
+	LD	(CSRNY),A
+	CALL	ZPRINT
+CTKX1:	DB	$1B,"H",0
+	JR	PRINT3
+CTRL_H:
+	; BS: 破壊的バックスペース（S-OS準拠）
+	; 論理行先頭なら何もしない、それ以外は左移動+DEL
+	LD	A,(XYADR)
+	OR	A
+	JR	NZ,.CTRL_H_NOTHEAD
+	; X==0: 論理行先頭チェック
+	CALL	GETLHD_LOCAL	; A = 論理行先頭行
+	LD	B,A
+	LD	A,(CSRNY)
+	CP	B
+	JP	Z,PRINT3	; 論理行先頭 → 何もしない
+	; X==0だが論理行先頭ではない → 前行末尾へ移動
+	DEC	A
+	LD	(CSRNY),A
+	LD	A,(AT_WIDTH)
+	DEC	A
+	LD	(XYADR),A
+	JR	.CTRL_H_DEL
+.CTRL_H_NOTHEAD
+	DEC	A
+	LD	(XYADR),A
+.CTRL_H_DEL
+	; カーソル位置の文字を削除（VRAM左シフト+末尾にスペース）
+	LD	A,(CSRNY)
+	LD	H,A
+	LD	A,(XYADR)
+	LD	L,A
+	CALL	LOC1_LOCAL	; HL = カーソルVRAMオフセット
+	PUSH	HL
+	CALL	GETLNL_LOCAL	; A = 論理行末尾+1行
+	LD	H,A
+	LD	L,0
+	CALL	LOC1_LOCAL	; HL = 末尾+1行先頭
+	DEC	HL		; HL = 論理行最終バイト
+	EX	DE,HL		; DE = 末尾オフセット
+	POP	HL		; HL = カーソルオフセット
+	CALL	VSHIFT_LEFT	; VRAM左シフト
+	EX	DE,HL		; HL = 末尾オフセット
+	LD	A,$20
+	CALL	PUTCHR_LOCAL	; 末尾にスペース
+	; カーソル位置をESC Yで設定
+	JP	OUTPUT_CURSOR_POS
+CTRL_J:
+	; LF: Y++, スクロール判定
+	LD	A,(CSRNY)
+	INC	A
+	CP	LINE
+	JR	C,.CTRL_J_NOSC
+	CALL	ROLUP_LINTTB
+	LD	A,LINE-1
+.CTRL_J_NOSC
+	LD	(CSRNY),A
+	JP	PRINT2		; BDOS出力
+CTRL_I:
+	LD	A,(XYADR)
+	AND	7
+	LD	B,A
+	LD	A,8
+	SUB	B
+	LD	B,A
+CTRL_I1:
+	LD	A,$20
+	CALL	PRINT
+	DJNZ	CTRL_I1
+	JP	PRINT3
+
+; カーソルキーハンドラ
+CTRL_CUR_U:
+	; カーソル上: Y-- (0で停止)
+	LD	A,(CSRNY)
+	OR	A
+	JP	Z,PRINT3	; 移動しない場合は何も出力しない
+	DEC	A
+	LD	(CSRNY),A
+	JP	OUTPUT_CURSOR_POS
+
+CTRL_CUR_D:
+	; カーソル下: Y++ (LINE-1で停止)
+	LD	A,(CSRNY)
+	INC	A
+	CP	LINE
+	JP	NC,PRINT3	; 移動しない場合は何も出力しない
+	LD	(CSRNY),A
+	JP	OUTPUT_CURSOR_POS
+
+CTRL_CUR_R:
+	; カーソル右: X++, WIDTH到達で次行へ
+	LD	A,(XYADR)
+	INC	A
+	LD	B,A
+	LD	A,(AT_WIDTH)
+	CP	B
+	JR	NZ,.CUR_R_SET
+	; 折り返し
+	LD	B,0
+	LD	A,(CSRNY)
+	INC	A
+	CP	LINE
+	JR	NC,.CUR_R_SET2
+	LD	(CSRNY),A
+.CUR_R_SET2
+.CUR_R_SET
+	LD	A,B
+	LD	(XYADR),A
+	JP	OUTPUT_CURSOR_POS
+
+CTRL_CUR_L:
+	; カーソル左: X--, 0で前行末尾へ
+	LD	A,(XYADR)
+	OR	A
+	JR	NZ,.CUR_L_DEC
+	; X==0: 前行末尾
+	LD	A,(CSRNY)
+	OR	A
+	JP	Z,PRINT3	; 左上端 → 何もしない
+	DEC	A
+	LD	(CSRNY),A
+	LD	A,(AT_WIDTH)
+	DEC	A
+	LD	(XYADR),A
+	JP	OUTPUT_CURSOR_POS
+.CUR_L_DEC
+	DEC	A
+	LD	(XYADR),A
+	JP	OUTPUT_CURSOR_POS
+
+; ESC Y <row+$20> <col+$20> でカーソル位置を直接設定
+OUTPUT_CURSOR_POS:
+	LD	E,$1B
+	LD	C,$06
+	CALL	SYSTEM
+	LD	E,'Y'
+	LD	C,$06
+	CALL	SYSTEM
+	LD	A,(CSRNY)
+	ADD	A,$20
+	LD	E,A
+	LD	C,$06
+	CALL	SYSTEM
+	LD	A,(XYADR)
+	ADD	A,$20
+	LD	E,A
+	JP	PRINT2
+
+;
+BOOT:
+	CALL	RESTORE_BIOS18
+	LD	HL,0
+	LD	($0001),HL
+	JP	0
+
+; 直接ジャンプさせる
+;
+;_PRINT:	JP	PRINT
+;_LOC:	JP	LOC
+;_CSR:	JP	CSR
+;_SCRN:	JP	SCRN
+;_GETL:	JP	GETL
+;_NL:	JP	NL
+;_GETKY:	JP	GETKY
+;_FLGET:	JP	FLGET
+;
+;_MPRNT:	JP	MPRNT
+;_BRKEY:	JP	BRKEY
+;_INKEY:	JP	INKEY
+;_CAP:	JP	CAP
+;_KYBFC:	JP	KYBFC
+
+; 実際にWIDTHを切り替える場合はこれを生かす……が、基本的には80x25のみ対応なのであまり意味はない
+#IF exists IOCSWIDTH
+IOCS_WIDCH:
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+
+	; OS作業領域からWK1FD0を読んでスキャン周波数を判定
+	PUSH	AF
+	LD	A,(WBOOTBK+1)	; OSページ高位バイト
+	LD	H,A
+	LD	L,$BF		; WK1FD0オフセット
+	LD	C,(HL)
+	POP	AF
+
+	CP	41
+	JR	C,WIDTH40
+	BIT	0,C
+	LD	HL,_C8025L
+	JR	Z,SETCRTC
+	LD	HL,_C8025H
+	JR	SETCRTC
+WIDTH40:
+	BIT	0,C
+	LD	HL,_C4025L
+	JR	Z,SETCRTC
+	LD	HL,_C4025H
+SETCRTC:
+	LD	DE,_CRTCD
+	LD	BC,16
+	LDIR
+
+	; OS作業領域(CRTCD〜WK1FD0)にもコピーして
+	; LSX-Dodgersの_WIDTH/_PAGE_MINUS/_WIDTH_MINUS等を更新
+	LD	HL,_CRTCD
+	LD	A,(WBOOTBK+1)	; OSページ高位バイト
+	LD	D,A
+	LD	E,$B0		; CRTCD offset
+	LD	BC,16
+	LDIR
+	; _HEIGHTも25に設定
+	LD	E,$97		; _HEIGHTオフセット
+	LD	A,LINE
+	LD	(DE),A
+
+	LD	HL,_CRTCD
+	XOR	A
+SETCRT1:
+	LD	BC,01800H
+	OUT	(C),A
+	INC	C
+	INC	B
+	OUTI
+	INC	A
+	CP	12
+	JR	NZ,SETCRT1
+	INC	HL
+	INC	HL
+	LD	BC,01A03H+00100H	;OUTIは先にBを減らすので足している
+	OUTI
+	LD	BC,01FD0H+00100H
+	OUTI
+
+	CALL	CTRL0C
+	POP	HL
+	POP	DE
+	POP	BC
+	LD	A,(WK1FD0)
+	LD	(_WK1FD0),A
+	LD	A,(_CRTCD+1)
+	LD	(AT_WIDTH),A
+	AND	A
+	RET
+
+CTRL0C:
+	CALL	CLR_LINTTB
+	XOR	A
+	LD	(CSRNY),A
+	CALL	PCLR		; XYADR=0
+	CALL	CTRL0B
+CTRL06:
+	LD	BC,(_TXADR)
+C1AX1:
+	LD	A,B
+	OR	038H
+	LD	B,A
+	DB	0EDH,071H	;OUT (C),0	Z80未定義命令	kanji
+	RES	3,B
+	LD	A,020H
+	OUT	(C),A		;Text
+	RES	4,B
+	LD	A,(AT_COLORF)
+	OUT	(C),A		;Color
+	INC	BC
+	RES	5,B
+	LD	HL,(_CRTCD+10)
+	ADD	HL,BC
+	JR	NC,C1AX1
+	; LSX-Dodgersのカーソル位置を同期
+	CALL	ZPRINT
+	DB	$1B,"E",0
+	RET
+CTRL0B:
+	LD	HL,0
+	LD	(_TXADR),HL
+	RET
+
+
+AT_COLORF:
+	DB	7
+
+AT_WIDTH:
+	DB	80
+
+_TXADR:	DW	0
+
+
+_WK1FD0:DB	0	;=PORT$1FD0
+LINE	EQU	25
+_CRTCD:
+	DB	06FH,050H,059H,038H,01FH,002H,019H,01CH
+	DB	000H,007H
+	DW	0-80*LINE,0-80
+	DB	00CH
+WK1FD0:	DB	020H
+
+_C8025L:
+	DB	06FH,050H,059H,038H,01FH,002H,019H,01CH
+	DB	000H,007H
+	DW	0-80*LINE,0-80
+	DB	00CH
+	DB	020H
+
+_C8025H:
+	DB	06BH,050H,059H,088H,01BH,000H,019H,01AH
+	DB	000H,00FH
+	DW	0-80*LINE,0-80
+	DB	00CH
+	DB	023H
+
+_C4025L:
+	DB	037H,028H,02DH,034H,01FH,002H,019H,01CH
+	DB	000H,007H
+	DW	0-40*LINE,0-40
+	DB	00DH
+	DB	020H
+
+_C4025H:
+	DB	035H,028H,02DH,084H,01BH,000H,019H,01AH
+	DB	000H,00FH
+	DW	0-40*LINE,0-40
+	DB	00DH
+	DB	023H
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; LINTTB管理サブルーチン群
+
+; LINTTBを全クリア（全行を論理行開始に）
+CLR_LINTTB:
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	LD	HL,LINTTB
+	LD	DE,LINTTB+1
+	LD	BC,LINE-1
+	XOR	A
+	LD	(HL),A
+	LDIR
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+; LINTTBを1行上にスクロール（先頭行を破棄、末尾に$00追加）
+ROLUP_LINTTB:
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	LD	HL,LINTTB+1
+	LD	DE,LINTTB
+	LD	BC,LINE-1
+	LDIR
+	XOR	A
+	LD	(DE),A		; 末尾行=$00（新論理行）
+	POP	HL
+	POP	DE
+	POP	BC
+	RET
+
+; 折り返し処理: Y++, LINTTB[Y]=$FF, スクロール判定
+; 破壊: AF
+WRAP_LINE:
+	PUSH	DE
+	PUSH	HL
+	LD	A,(CSRNY)
+	INC	A
+	CP	LINE
+	JR	C,.WRAP_NOSCROLL
+	CALL	ROLUP_LINTTB
+	LD	A,LINE-1
+.WRAP_NOSCROLL
+	LD	(CSRNY),A
+	; LINTTB[Y] = $FF（前行の続き）
+	LD	E,A
+	LD	D,0
+	LD	HL,LINTTB
+	ADD	HL,DE
+	LD	(HL),$FF
+	POP	HL
+	POP	DE
+	RET
+
+; NEWLINE処理: Y++, LINTTB[Y]=$00（新論理行）, スクロール判定
+; 破壊: AF
+NEWLINE:
+	PUSH	DE
+	PUSH	HL
+	LD	A,(CSRNY)
+	INC	A
+	CP	LINE
+	JR	C,.NL_NOSCROLL
+	CALL	ROLUP_LINTTB
+	LD	A,LINE-1
+.NL_NOSCROLL
+	LD	(CSRNY),A
+	; LINTTB[Y] = $00（新論理行開始）
+	LD	E,A
+	LD	D,0
+	LD	HL,LINTTB
+	ADD	HL,DE
+	LD	(HL),$00
+	POP	HL
+	POP	DE
+	RET
+
+; (H=行, L=列) → HL=VRAMオフセット
+; HL = AT_WIDTH * H + L
+; 破壊: なし
+LOC1_LOCAL:
+	PUSH	DE
+	PUSH	BC
+	LD	C,L		; C = col
+	LD	B,8
+	LD	E,H		; E = row
+	LD	D,0
+	LD	A,(AT_WIDTH)
+	LD	H,A
+	LD	L,D		; HL = WIDTH << 8
+.LOC1_MUL
+	ADD	HL,HL
+	JR	NC,.LOC1_NOADD
+	ADD	HL,DE
+.LOC1_NOADD
+	DJNZ	.LOC1_MUL
+	LD	B,D		; B = 0
+	ADD	HL,BC		; + col
+	POP	BC
+	POP	DE
+	RET
+
+; VRAMから1バイト読み取り
+; 入力: HL=VRAMオフセット  出力: A=文字コード
+; 破壊: なし（BCは保存）
+GETCHR_LOCAL:
+	PUSH	BC
+	LD	A,H
+	OR	$30		; テキストVRAM上位 $30xx
+	LD	B,A
+	LD	C,L
+	IN	A,(C)
+	POP	BC
+	RET
+
+; VRAMに1バイト書き込み
+; 入力: HL=VRAMオフセット, A=文字コード
+; 破壊: なし（BCは保存）
+PUTCHR_LOCAL:
+	PUSH	BC
+	PUSH	AF
+	LD	A,H
+	OR	$30
+	LD	B,A
+	LD	C,L
+	POP	AF
+	OUT	(C),A
+	POP	BC
+	RET
+
+; VRAM右シフト（1バイト分）
+; 入力: DE=開始オフセット, HL=終了オフセット
+; VRAM[start..end-1] → VRAM[start+1..end]
+; 破壊: AF, HL
+VSHIFT_RIGHT:
+	; バイト数チェック
+	PUSH	HL
+	OR	A
+	SBC	HL,DE
+	LD	A,H
+	OR	L
+	POP	HL
+	RET	Z		; 0バイトなら何もしない
+	; HL = 終了オフセット, DE = 開始オフセット
+	; 末尾から先頭へコピー
+.VSR_LOOP
+	PUSH	HL
+	DEC	HL
+	CALL	GETCHR_LOCAL	; A = VRAM[HL-1]
+	POP	HL
+	CALL	PUTCHR_LOCAL	; VRAM[HL] = A
+	DEC	HL
+	; HL == DE で終了
+	LD	A,H
+	CP	D
+	JR	NZ,.VSR_LOOP
+	LD	A,L
+	CP	E
+	JR	NZ,.VSR_LOOP
+	RET
+
+; VRAM左シフト（1バイト分）
+; 入力: HL=開始オフセット, DE=終了オフセット
+; VRAM[start+1..end] → VRAM[start..end-1]
+; 破壊: AF, HL
+VSHIFT_LEFT:
+	; バイト数チェック
+	PUSH	HL
+	EX	DE,HL
+	OR	A
+	SBC	HL,DE		; HL = end - start
+	EX	DE,HL		; DE = end - start
+	POP	HL		; HL = start
+	LD	A,D
+	OR	E
+	RET	Z		; 0バイトなら何もしない
+	; HL = 開始オフセット, 開始から終了へコピー
+	PUSH	DE		; 保存（カウンタとして使わない、終了判定に使う）
+	; 実際の終了ofsを再計算
+	POP	DE
+	PUSH	HL		; 開始位置保存
+	ADD	HL,DE		; HL = 開始+差分 = 終了ofs
+	EX	DE,HL		; DE = 終了ofs
+	POP	HL		; HL = 開始ofs
+.VSL_LOOP
+	PUSH	HL
+	INC	HL
+	CALL	GETCHR_LOCAL	; A = VRAM[HL+1]
+	POP	HL
+	CALL	PUTCHR_LOCAL	; VRAM[HL] = A
+	INC	HL
+	LD	A,H
+	CP	D
+	JR	NZ,.VSL_LOOP
+	LD	A,L
+	CP	E
+	JR	NZ,.VSL_LOOP
+	RET
+
+; VRAMを指定文字で埋める
+; 入力: HL=開始オフセット, BC=バイト数, A=文字
+; 破壊: BC, HL
+FILVRM_LOCAL:
+	PUSH	DE
+	LD	D,A		; D = 文字
+.FIL_LOOP
+	LD	A,B
+	OR	C
+	JR	Z,.FIL_DONE
+	LD	A,D
+	CALL	PUTCHR_LOCAL
+	INC	HL
+	DEC	BC
+	JR	.FIL_LOOP
+.FIL_DONE
+	POP	DE
+	RET
+
+; VRAM間ブロック転送
+; 入力: HL=転送元, DE=転送先, BC=バイト数
+; 方向自動判定（HL<DE: 逆方向、HL>=DE: 順方向）
+; 破壊: AF, BC, DE, HL
+VBTRNS_LOCAL:
+	LD	A,B
+	OR	C
+	RET	Z
+	PUSH	HL
+	OR	A
+	SBC	HL,DE
+	POP	HL
+	JR	NC,.VBT_FORWARD
+	; 逆方向: 末尾から
+	PUSH	BC
+	ADD	HL,BC
+	DEC	HL		; HL = 転送元末尾
+	EX	DE,HL
+	ADD	HL,BC
+	DEC	HL		; HL = 転送先末尾
+	EX	DE,HL		; HL=転送元末尾, DE=転送先末尾
+	POP	BC
+.VBT_REV
+	CALL	GETCHR_LOCAL
+	EX	DE,HL
+	CALL	PUTCHR_LOCAL
+	EX	DE,HL
+	DEC	HL
+	DEC	DE
+	DEC	BC
+	LD	A,B
+	OR	C
+	JR	NZ,.VBT_REV
+	RET
+.VBT_FORWARD
+	CALL	GETCHR_LOCAL
+	EX	DE,HL
+	CALL	PUTCHR_LOCAL
+	EX	DE,HL
+	INC	HL
+	INC	DE
+	DEC	BC
+	LD	A,B
+	OR	C
+	JR	NZ,.VBT_FORWARD
+	RET
+
+; CSRNYからLINTTBを逆走査して論理行先頭行番号を返す
+; 出力: A = 論理行先頭行番号
+; 破壊: DE, HL
+GETLHD_LOCAL:
+	LD	A,(CSRNY)
+.GLHD_LOOP
+	OR	A
+	RET	Z		; 行0は必ず先頭
+	LD	(.GLHD_ROW),A
+	LD	E,A
+	LD	D,0
+	LD	HL,LINTTB
+	ADD	HL,DE
+	LD	A,(HL)
+	OR	A
+	LD	A,(.GLHD_ROW)	; LD A,(nn) はフラグ不変
+	RET	Z		; $00 = この行が論理行開始
+	DEC	A
+	JR	.GLHD_LOOP
+.GLHD_ROW
+	DB	0
+
+; CSRNYからLINTTBを順走査して論理行末尾+1行番号を返す
+; 出力: A = 末尾+1行番号（最大LINE）
+; 破壊: DE, HL
+GETLNL_LOCAL:
+	LD	A,(CSRNY)
+	INC	A
+.GLNL_LOOP
+	CP	LINE
+	RET	NC		; 画面外 → LINE を返す
+	LD	(.GLNL_ROW),A
+	LD	E,A
+	LD	D,0
+	LD	HL,LINTTB
+	ADD	HL,DE
+	LD	A,(HL)
+	OR	A
+	LD	A,(.GLNL_ROW)	; フラグ不変
+	RET	Z		; $00 = 次の論理行開始
+	INC	A
+	JR	.GLNL_LOOP
+.GLNL_ROW
+	DB	0
+
+; VRAM→バッファ読み取り（論理行全体）
+; 入力: DE = 出力バッファ先頭
+; 出力: バッファにVRAMの論理行内容をコピー（末尾$00）
+; 破壊: AF, BC, DE, HL
+INPUTL_LOCAL:
+	PUSH	IX
+	; バッファ先頭アドレスを保存（トリム用）
+	LD	(.INL_BUFST),DE
+	PUSH	DE
+	POP	IX		; IX = バッファ先頭
+	; 論理行先頭行取得
+	CALL	GETLHD_LOCAL	; A = 先頭行番号
+	LD	(.INL_CURROW),A
+	; 論理行末尾+1行取得
+	CALL	GETLNL_LOCAL	; A = 末尾+1行番号
+	LD	(.INL_ENDROW),A
+
+	LD	A,(AT_WIDTH)
+	LD	(.INL_WIDTH),A
+	; 128バイト上限カウンタ
+	LD	B,127		; 最大127文字（+終端$00）
+
+	LD	A,(.INL_CURROW)
+.INL_ROWLOOP
+	PUSH	AF		; 現在行番号
+	; この行のVRAMオフセット算出
+	LD	H,A
+	LD	L,0
+	CALL	LOC1_LOCAL	; HL = 行先頭VRAMオフセット
+
+	LD	A,(.INL_WIDTH)
+	LD	C,A		; C = 列カウンタ
+.INL_COLLOOP
+	CALL	GETCHR_LOCAL
+	; 文字コード変換（VRAM→ASCII）
+	CALL	VRAM2ASCII
+	LD	(IX+0),A
+	INC	IX
+	INC	HL
+	DEC	B
+	JR	Z,.INL_FULL	; バッファ満杯
+	DEC	C
+	JR	NZ,.INL_COLLOOP
+
+	POP	AF		; 行番号
+	INC	A
+	CP	0		; placeholder
+.INL_ENDROW	EQU	$-1
+	JR	C,.INL_ROWLOOP
+	JR	.INL_TRIM	; 正常終了 — スタックは整合済み
+
+.INL_FULL
+	POP	AF		; バッファ満杯時のみ: 行番号のPUSH AFを解消
+.INL_TRIM
+	; 末尾トリム: $20以下を除去（バッファ先頭を下回らないように）
+	LD	DE,(.INL_BUFST)	; DE = バッファ先頭
+.INL_TRIMLP
+	PUSH	IX
+	POP	HL		; HL = IX（現在位置）
+	OR	A
+	SBC	HL,DE		; HL = IX - bufstart
+	LD	A,H
+	OR	L
+	JR	Z,.INL_TRIMEND	; バッファ先頭に到達 → 終了
+	DEC	IX
+	LD	A,(IX+0)
+	CP	$21
+	JR	C,.INL_TRIMLP
+	INC	IX
+.INL_TRIMEND
+	LD	(IX+0),$00	; 終端
+	POP	IX
+	RET
+
+.INL_CURROW
+	DB	0
+.INL_WIDTH
+	DB	0
+.INL_BUFST
+	DW	0
+
+; VRAM文字コード → ASCII変換
+; 入力/出力: A
+VRAM2ASCII:
+	CP	$9F
+	JR	Z,.V2A_BSLASH
+	CP	$87
+	JR	Z,.V2A_LBRACE
+	CP	$F0
+	JR	Z,.V2A_PIPE
+	CP	$9E
+	JR	Z,.V2A_TILDE
+	RET
+.V2A_BSLASH
+	LD	A,$5C		; '\'
+	RET
+.V2A_LBRACE
+	LD	A,$7B		; '{'
+	RET
+.V2A_PIPE
+	LD	A,$7C		; '|'
+	RET
+.V2A_TILDE
+	LD	A,$7E		; '~'
+	RET
+
+; インサートモード処理
+; PRINTの前に呼び出す。挿入モードならVRAMを右シフトする。
+; 入力: A = 文字
+; 出力: A = 文字（そのまま）
+GTINS_LOCAL:
+	CP	$20
+	RET	C		; 制御コードはスルー
+	PUSH	HL
+	LD	HL,INSFLG
+	BIT	0,(HL)		; INSFLG bit0テスト（$FF→set, $00→reset）
+	POP	HL
+	RET	Z		; 上書きモード（Aは保持される）
+
+	; --- 挿入モード ---
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+
+	; カーソルのVRAMオフセット算出
+	LD	A,(CSRNY)
+	LD	H,A
+	LD	A,(XYADR)
+	LD	L,A
+	CALL	LOC1_LOCAL
+	PUSH	HL		; [SP] = カーソルオフセット
+
+	; 論理行末尾のVRAMオフセット算出
+	CALL	GETLNL_LOCAL	; A = 末尾+1行番号
+	LD	H,A
+	LD	L,0
+	CALL	LOC1_LOCAL	; HL = 末尾+1行先頭
+	DEC	HL		; HL = 論理行最終バイト
+
+	; 末尾文字チェック
+	CALL	GETCHR_LOCAL	; A = 末尾文字
+	CP	$20		; スペースか？
+	JR	NZ,.GTINS_EXPAND
+
+	; --- スペース → 右シフトのみ ---
+	POP	DE		; DE = カーソルオフセット
+	; HL = 末尾ofs
+	CALL	VSHIFT_RIGHT
+	; カーソル位置にスペース書き込み
+	EX	DE,HL		; HL = カーソルオフセット
+	LD	A,$20
+	CALL	PUTCHR_LOCAL
+
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+.GTINS_EXPAND
+	; --- 行拡張が必要 ---
+	; A = 末尾文字（非スペース）を保存
+	LD	(.GTINS_LASTCH),A
+
+	; 論理行末尾+1行番号
+	CALL	GETLNL_LOCAL	; A = 末尾+1行番号
+	LD	(.GTINS_NXTROW),A
+
+	CP	LINE
+	JR	C,.GTINS_NOSC
+
+	; 画面最下行 → スクロール必要
+	; TODO: LSX-Dodgersとのスクロール同期が必要
+	; 今回は行拡張を断念（ベル音）
+	POP	HL		; カーソルofs捨て
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	PUSH	AF
+	LD	A,7		; BELL
+	CALL	PRINT
+	POP	AF
+	RET
+
+.GTINS_NOSC
+	; LINTTB挿入: 新行位置以降を1バイト下にシフト
+	LD	A,LINE-1
+	LD	B,A
+	LD	A,(.GTINS_NXTROW)
+	SUB	B		; A = NXTROW - (LINE-1)
+	NEG			; A = (LINE-1) - NXTROW = シフトバイト数
+	JR	Z,.GTINS_NOLSH
+	LD	C,A
+	LD	B,0		; BC = シフトバイト数
+	LD	HL,LINTTB+LINE-2
+	LD	DE,LINTTB+LINE-1
+	LDDR
+.GTINS_NOLSH
+	; 新行位置に$FF（前行の続き）を書き込み
+	LD	A,(.GTINS_NXTROW)
+	LD	E,A
+	LD	D,0
+	LD	HL,LINTTB
+	ADD	HL,DE
+	LD	(HL),$FF
+
+	; VRAM挿入: 新行位置以降のVRAMをWIDTH分下にシフト
+	LD	A,(.GTINS_NXTROW)
+	LD	H,A
+	LD	L,0
+	CALL	LOC1_LOCAL	; HL = 新行先頭VRAMオフセット
+	; 転送元 = HL
+	; 転送先 = HL + WIDTH
+	; バイト数 = (画面末尾) - 転送先
+	LD	A,(AT_WIDTH)
+	LD	C,A
+	LD	B,0
+	PUSH	HL		; 新行先頭ofs
+	LD	D,H
+	LD	E,L
+	ADD	HL,BC		; HL = 新行先頭 + WIDTH = 転送先
+	EX	DE,HL		; DE = 転送先, HL = 新行先頭(転送元)
+	; バイト数: 画面末尾ofs - 転送先ofs
+	PUSH	HL
+	PUSH	DE
+	LD	A,LINE
+	LD	H,A
+	LD	L,0
+	CALL	LOC1_LOCAL	; HL = 画面末尾+1
+	POP	DE		; DE = 転送先
+	OR	A
+	SBC	HL,DE		; HL = 転送バイト数
+	LD	B,H
+	LD	C,L
+	POP	HL		; HL = 転送元
+	LD	A,B
+	OR	C
+	JR	Z,.GTINS_NOVSH
+	CALL	VBTRNS_LOCAL
+.GTINS_NOVSH
+
+	; 新行をスペースで埋める
+	POP	HL		; HL = 新行先頭ofs
+	PUSH	HL
+	LD	A,(AT_WIDTH)
+	LD	C,A
+	LD	B,0
+	LD	A,$20
+	CALL	FILVRM_LOCAL
+
+	; 末尾文字を新行先頭に転記
+	POP	HL		; HL = 新行先頭ofs
+	LD	A,(.GTINS_LASTCH)
+	CALL	PUTCHR_LOCAL
+
+	; カーソル位置〜元の末尾を右シフト
+	POP	DE		; DE = カーソルofsを取得
+	PUSH	DE
+	; 元の末尾 = 新行先頭 - 1
+	LD	A,(.GTINS_NXTROW)
+	LD	H,A
+	LD	L,0
+	CALL	LOC1_LOCAL
+	DEC	HL		; HL = 元の末尾ofs
+	CALL	VSHIFT_RIGHT
+
+	; カーソル位置にスペース
+	POP	HL		; HL = カーソルofs
+	LD	A,$20
+	CALL	PUTCHR_LOCAL
+
+	POP	HL
+	POP	DE
+	POP	BC
+	POP	AF
+	RET
+
+.GTINS_NXTROW
+	DB	0
+.GTINS_LASTCH
+	DB	0
+
+#ENDIF
+
+[NAME_SPACE_DEFAULT]
