@@ -575,7 +575,21 @@ GETKY:
 	PUSH	HL
 	LD	E,$FF
 	LD	C,$06		;INPOUT
-	JR	GETKY1
+	CALL	SYSTEM
+	POP	HL
+	POP	DE
+	POP	BC
+	OR	A
+	RET	NZ		; キーあり → そのまま返す
+	; キーなし → _KEYDで押下中キーを確認しリピート
+	PUSH	HL
+	LD	A,(WBOOTBK+1)
+	LD	H,A
+	LD	L,$92		; _KEYDオフセット
+	LD	A,(HL)
+	POP	HL
+	OR	A		; _KEYD=0ならキー未押下
+	RET
 ;
 _FLGET:
 FLGET:
