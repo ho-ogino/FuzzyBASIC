@@ -20,9 +20,18 @@ OUT_DIR = ROOT_DIR / "out"
 DIST_DIR = ROOT_DIR / "dist"
 ASSETS_DIR = ROOT_DIR / "assets"
 DISK_DIR = ROOT_DIR / "disk"
+TOOLS_DIR = ROOT_DIR / "tools"
 DISK_CLEAN_DIR = DISK_DIR / "clean"
 DISK_WORK_DIR = DISK_DIR / "work"
 HUDISK_EXE = ROOT_DIR / "tools" / "HuDisk.exe"
+
+
+@dataclass(frozen=True)
+class ExtraBuild:
+    source: str
+    args: tuple[str, ...]
+    outputs: tuple[tuple[str, str], ...]
+    assembler: str = ""  # Override assembler (empty = use default)
 
 
 @dataclass(frozen=True)
@@ -32,11 +41,14 @@ class Target:
     args: tuple[str, ...]
     outputs: tuple[tuple[str, str], ...]
     description: str
+    version: str = ""
+    extra_builds: tuple[ExtraBuild, ...] = ()
 
 
 TARGETS = {
     "lsx": Target(
         name="lsx",
+        version="1.2L",
         source="FUZZY.ASM",
         args=("-dl", "IS_LSX=1", "-gap", "0", "-bin", "-lst", "-sym", "-f"),
         outputs=(
@@ -45,6 +57,20 @@ TARGETS = {
             ("FUZZY.SYM", "FUZZY.SYM"),
         ),
         description="Build the LSX-Dodgers binary.",
+        extra_builds=(
+            ExtraBuild(
+                source="playerAkm_x1_wrapper.asm",
+                args=("-o", "PSGDRV_AKM", "-s"),
+                outputs=(("PSGDRV_AKM.bin", "PSGAKM.BIN"), ("PSGDRV_AKM.sym", "PSGAKM.SYM")),
+                assembler="/usr/local/bin/rasm",
+            ),
+            ExtraBuild(
+                source="playerAkg_x1_wrapper.asm",
+                args=("-o", "PSGDRV_AKG", "-s"),
+                outputs=(("PSGDRV_AKG.bin", "PSGAKG.BIN"), ("PSGDRV_AKG.sym", "PSGAKG.SYM")),
+                assembler="/usr/local/bin/rasm",
+            ),
+        ),
     ),
     "sos": Target(
         name="sos",
@@ -67,8 +93,8 @@ DEPLOY_TARGETS = {
     "lsx": {
         "clean_image": "LSX162b.d88",
         "work_image": "FuzzyBASIC-LSX.d88",
-        "zip_name": "FuzzyBASIC_v1.1L.zip",
-        "d88_name": "FuzzyBASIC_v1.1L.d88",
+        "zip_name": "FuzzyBASIC_v1.2L.zip",
+        "d88_name": "FuzzyBASIC_v1.2L.d88",
         "items": (
             {"path": OUT_DIR / "lsx" / "FZBASIC.COM", "image_name": "FZBASIC.COM"},
             {"path": ASSETS_DIR / "MAGIC.BIN", "image_name": "MAGIC.BIN"},
@@ -76,10 +102,17 @@ DEPLOY_TARGETS = {
             {"path": ASSETS_DIR / "FURUI.BAS", "image_name": "FURUI.BAS"},
             {"path": ASSETS_DIR / "CKYOK.BAS", "image_name": "CKYOK.BAS"},
             {"path": ASSETS_DIR / "PCG_LSX.BAS", "image_name": "PCG.BAS"},
+            {"path": OUT_DIR / "lsx" / "PSGAKM.BIN", "image_name": "PSGAKM.BIN"},
+            {"path": OUT_DIR / "lsx" / "PSGAKG.BIN", "image_name": "PSGAKG.BIN"},
+            {"path": ASSETS_DIR / "BGM.BAS", "image_name": "BGM.BAS"},
+            {"path": ASSETS_DIR / "BGM.AKG", "image_name": "BGM.AKG"},
+            {"path": ASSETS_DIR / "BGM.AKM", "image_name": "BGM.AKM"},
+            {"path": ASSETS_DIR / "SE.AKX", "image_name": "SE.AKX"},
         ),
         "dist_files": (
             DISK_DIR / "README.txt",
             DISK_DIR / "COPYING",
+            DISK_DIR / "COPYING.AT3",
         ),
     },
     "sos": {
@@ -138,6 +171,11 @@ def parse_args() -> argparse.Namespace:
         "--keep-work",
         action="store_true",
         help="Keep the copied working directory under out/<target>/work.",
+    )
+    parser.add_argument(
+        "--autorun",
+        action="store_true",
+        help="Enable AUTORUN.BAS on startup (adds ENABLE_AUTORUN=1 define).",
     )
     parser.add_argument(
         "--ndc",
@@ -268,14 +306,27 @@ def prepare_work_dir(target_dir: Path) -> Path:
     return work_dir
 
 
-def build_target(target: Target, assembler: str, keep_work: bool) -> None:
+def build_target(target: Target, assembler: str, keep_work: bool,
+                  extra_defines: list[str] | None = None) -> None:
     target_dir = OUT_DIR / target.name
     if target_dir.exists():
         shutil.rmtree(target_dir)
     target_dir.mkdir(parents=True)
 
     work_dir = prepare_work_dir(target_dir)
-    command = [assembler, target.source, *target.args]
+    # Inject extra defines after existing -dl arguments (ailz80asm)
+    args_list = list(target.args)
+    if extra_defines:
+        try:
+            dl_idx = args_list.index("-dl")
+            insert_at = dl_idx + 1
+            while insert_at < len(args_list) and not args_list[insert_at].startswith("-"):
+                insert_at += 1
+            for d in reversed(extra_defines):
+                args_list.insert(insert_at, d)
+        except ValueError:
+            args_list.extend(["-dl", *all_extra])
+    command = [assembler, target.source, *args_list]
 
     print(f"[build] {target.name}: {' '.join(command)}")
     subprocess.run(command, cwd=work_dir, check=True)
@@ -287,6 +338,31 @@ def build_target(target: Target, assembler: str, keep_work: bool) -> None:
                 f"Expected output was not generated for {target.name}: {produced_name}"
             )
         shutil.copy2(produced_path, target_dir / output_name)
+
+    for extra in target.extra_builds:
+        extra_asm = extra.assembler or assembler
+        extra_command = [extra_asm, extra.source, *extra.args]
+        print(f"[build] {target.name} (extra): {' '.join(extra_command)}")
+        subprocess.run(extra_command, cwd=work_dir, check=True)
+        for produced_name, output_name in extra.outputs:
+            produced_path = work_dir / produced_name
+            if not produced_path.exists():
+                raise FileNotFoundError(
+                    f"Expected output was not generated for {target.name}: {produced_name}"
+                )
+            shutil.copy2(produced_path, target_dir / output_name)
+
+    # Generate address map JSON if SYM file exists and version is set
+    sym_path = target_dir / "FUZZY.SYM"
+    if sym_path.exists() and target.version:
+        gen_script = TOOLS_DIR / "gen_addrmap.py"
+        if gen_script.exists():
+            json_path = target_dir / "addrmap.json"
+            subprocess.run(
+                [sys.executable, str(gen_script), str(sym_path),
+                 "-v", target.version, "-o", str(json_path)],
+                check=True,
+            )
 
     if not keep_work:
         shutil.rmtree(work_dir)
@@ -417,9 +493,13 @@ def main() -> int:
         assembler = resolve_assembler(args.assembler)
         targets = expand_targets(args.targets, DEFAULT_BUILD_TARGETS)
 
+        extra_defines = []
+        if args.autorun:
+            extra_defines.append("ENABLE_AUTORUN=1")
+
         OUT_DIR.mkdir(exist_ok=True)
         for target in targets:
-            build_target(target, assembler, args.keep_work)
+            build_target(target, assembler, args.keep_work, extra_defines)
 
         print("[done] Outputs are under out/<target>/")
     else:

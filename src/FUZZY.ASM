@@ -1,6 +1,21 @@
 ; FuzzyBASIC for LSX-Dodgers
 
 MAGICTOP	EQU	$B000
+#IF exists IS_LSX
+SOUNDTOP	EQU	$C300
+SND_Init	EQU	SOUNDTOP+$00
+SND_BGMPlay	EQU	SOUNDTOP+$03
+SND_BGMStop	EQU	SOUNDTOP+$06
+SND_BGMPause	EQU	SOUNDTOP+$09
+SND_BGMResume	EQU	SOUNDTOP+$0C
+SND_SFXInit	EQU	SOUNDTOP+$0F
+SND_SFXPlay	EQU	SOUNDTOP+$12
+SND_SFXStop	EQU	SOUNDTOP+$15
+SND_PSG_PROC	EQU	SOUNDTOP+$18
+SND_PSG_END	EQU	SOUNDTOP+$1B
+SND_CTC_PORT	EQU	SOUNDTOP+$1E
+SND_CTCVEC	EQU	SOUNDTOP+$20
+#ENDIF
 magic		EQU	(MAGICTOP+4)
 pdata		EQU	(MAGICTOP+$1202)
 
@@ -102,7 +117,7 @@ COLD:
 		call	SOS.MPRNT
 		db "* Fuzzy BASIC interpreter"
 #IF exists IS_LSX
-		db " ver 1.1L *"
+		db " ver 1.2L *"
 #ELSE
 		db " ver 1.1S *"
 #ENDIF
@@ -130,7 +145,11 @@ COLD:
 		db	" bytes free"
 		dw	0Dh
 _autorun_:				; AUTORUN SW.
-		db	$01		; (ON .. $CD , OFF .. $01)
+#IF exists ENABLE_AUTORUN
+		db	$CD		; ON (CALL AUTORUN)
+#ELSE
+		db	$01		; OFF
+#ENDIF
 		dw AUTORUN
 HOT:
 		ld	sp, (SYSSTK)
@@ -2683,6 +2702,9 @@ JIKKOU:
 LINED:
 		call	SOS.BRKEY
 		call	z, BREAK
+#IF exists IS_LSX
+		call	SNDPOLL
+#ENDIF
 		ld	a, (ix+0)
 		cp	3Ah ; ':'
 		jr	z, JIKKO0
@@ -2696,6 +2718,9 @@ NXLIN:
 		call	NXLIN_Q
 		call	SOS.BRKEY
 		call	z, BREAK100
+#IF exists IS_LSX
+		call	SNDPOLL
+#ENDIF
 		jr	JIKKOU
 
 LABSKP:
@@ -5200,7 +5225,11 @@ SMTBL_CLS:
 
 		dw	err35,err35,err35,err35
 		dw	err35,err35,err35,err35
+#IF exists IS_LSX
+		dw	PCGDEF_,TCOLOR_,SOUND_,err35
+#ELSE
 		dw	PCGDEF_,TCOLOR_,err35,err35
+#ENDIF
 
 FUNCTBL:
 		dw	HIGH,LOW,_EX_,NOT
@@ -6008,7 +6037,7 @@ DCLS:
 		db	ssdone
 
 GRAPHTBL:
-		dw	SMTBL+(511ch-4FDAh),POINT
+		dw	SMTBL+(5124h-4FDAh),POINT	; 511Ch→5124h: SMTBL拡張(+8bytes)に伴うFUNCTBLオフセット補正
 		dw	SMTBL+(507eh-4FDAh),BOX
 		dw	SMTBL+(5080h-4FDAh),CIRCLE
 		dw	SMTBL+(5084h-4FDAh),DOT
@@ -6047,6 +6076,187 @@ TCOLOR_:
 		pop	hl
 #ENDIF
 		ret
+
+#IF exists IS_LSX
+; ====================================================================================================
+; SOUND n コマンド
+;   SOUND 0         ... ドライバ無効化・終了
+;   SOUND 1         ... ドライバ初期化・有効化
+;   SOUND 2,addr    ... BGM再生
+;   SOUND 3         ... BGM停止
+;   SOUND 4         ... BGM一時停止
+;   SOUND 5         ... BGM再開
+;   SOUND 6,addr    ... SFXテーブル初期化
+;   SOUND 7,n,ch    ... SFX再生 (n=SFX番号, ch=チャンネル0-2)
+;   SOUND 8,ch      ... SFX停止 (ch=チャンネル0-2)
+; ====================================================================================================
+SOUND_:
+		call	SK		; 式評価 → HL, L=サブコマンド番号
+		ld	a, l
+		or	a
+		jp	z, .SOFF	; SOUND 0 → 無効化
+		dec	a
+		jr	z, .SON		; SOUND 1 → 有効化
+		; SOUND 2-8はSNDFLG!=0(SOUND 1済み)が必要
+		push	af
+		ld	a, (SOS.SNDFLG)
+		or	a
+		jr	nz, .SNDOK
+		pop	af
+		jp	err13		; SOUND未初期化エラー
+.SNDOK
+		pop	af
+		dec	a
+		jp	z, .SBGM	; SOUND 2,addr → BGM再生
+		dec	a
+		jp	z, .SBGMSTOP	; SOUND 3 → BGM停止
+		dec	a
+		jp	z, .SBGMPAUSE	; SOUND 4 → BGM一時停止
+		dec	a
+		jp	z, .SBGMRESUME	; SOUND 5 → BGM再開
+		dec	a
+		jp	z, .SSFXINIT	; SOUND 6,addr → SFXテーブル初期化
+		dec	a
+		jp	z, .SSFXPLAY	; SOUND 7,n,ch → SFX再生
+		dec	a
+		jp	z, .SSFXSTOP	; SOUND 8,ch → SFX停止
+		jp	err13		; パラメータエラー
+
+.SON
+		ld	a, (SOS.SNDFLG)
+		or	a
+		jr	z, .SON_FIRST
+		; 二重初期化
+		ld	a, (SOS.SNDCTC)
+		or	a
+		jr	nz, .SON_REINIT_CTC
+		; 非CTC: 完全再初期化（PSG_PROCのNOP化をやり直す必要あり）
+		call	SND_BGMStop		; BGMStop
+		xor	a
+		ld	(SOS.SNDFLG), a		; フラグクリアして初回扱い
+		jr	.SON_FIRST
+.SON_REINIT_CTC
+		; CTC: ワーククリアのみ（CTC割り込みはそのまま）
+		jp	SND_BGMStop		; BGMStop → LINED戻り
+.SON_FIRST
+		; WBOOTBKからOSページを取得し、CTC情報を計算
+		ld	a, (SOS.WBOOTBK+1)	; OSページ高位バイト
+		ld	h, a
+		ld	l, $8C			; _CTCオフセット
+		ld	c, (hl)
+		inc	hl
+		ld	b, (hl)			; BC = CTC I/Oポート (0=CTC無し)
+		ld	(SND_CTC_PORT), bc	; SND_CTC_PORT
+
+		ld	a, b
+		or	c
+		jr	z, .SON_NOCTC
+
+		; CTC有り: CTC0アドレスも計算
+		ld	a, (SOS.WBOOTBK+1)
+		ld	h, a
+		ld	l, $C0			; CTC0オフセット
+		ld	(SND_CTCVEC), hl	; SND_CTCVEC
+		ld	a, $FF
+		ld	(SOS.SNDCTC), a
+		ld	l, 1			; CTC割り込みモード
+		jr	.SON_INIT
+
+.SON_NOCTC
+		ld	hl, 0
+		ld	(SND_CTCVEC), hl	; SND_CTCVEC = 0
+		xor	a
+		ld	(SOS.SNDCTC), a
+		ld	l, 0			; 非CTCモード
+
+.SON_INIT
+		call	SND_Init
+		ld	a, $FF
+		ld	(SOS.SNDFLG), a
+		xor	a
+		ld	(SOS.VSYNC_PREV), a
+		ret
+
+.SOFF
+		ld	a, (SOS.SNDFLG)
+		or	a
+		ret	z			; 未初期化時はno-op
+		ld	a, (SOS.SNDCTC)
+		or	a
+		jr	z, .SOFF_NOCTC
+		call	SND_PSG_END		; PSG_END (CTC解除+停止)
+		jr	.SOFF_DONE
+.SOFF_NOCTC
+		call	SND_BGMStop		; BGMStop
+.SOFF_DONE
+		xor	a
+		ld	(SOS.SNDFLG), a
+		ret
+
+.SBGM
+		call	CARE_Q
+		call	SK			; HL=BGMデータアドレス
+		jp	SND_BGMPlay		; BGMPlay
+
+.SBGMSTOP
+		jp	SND_BGMStop		; BGMStop
+
+.SBGMPAUSE
+		jp	SND_BGMPause		; BGMPause
+
+.SBGMRESUME
+		jp	SND_BGMResume		; BGMResume
+
+.SSFXINIT
+		call	CARE_Q
+		call	SK			; HL=SFXテーブルアドレス
+		jp	SND_SFXInit		; SFXInit
+
+.SSFXPLAY
+		call	CARE_Q
+		call	SK			; HL, L=SFX番号
+		push	hl
+		call	CARE_Q
+		call	SK			; HL, L=チャンネル番号
+		pop	de			; D=不要, E=SFX番号(元のL)
+		ld	h, l			; H=チャンネル番号
+		ld	l, e			; L=SFX番号
+		jp	SND_SFXPlay		; SFXPlay (L=SFX番号, H=チャンネル)
+
+.SSFXSTOP
+		call	CARE_Q
+		call	SK			; HL, L=チャンネル番号(0-2)
+		jp	SND_SFXStop		; SFXStop
+
+; ====================================================================================================
+; SNDPOLL - VSYNCポーリングによるサウンドドライバ呼び出し
+;   LINED (各文実行後のBRKEYチェック直後) から呼ばれる
+;   非CTC環境でのみ VSYNC立ち上がりエッジを検出して PSG_PROC を呼ぶ
+; ====================================================================================================
+SNDPOLL:
+		ld	a, (SOS.SNDFLG)
+		or	a
+		ret	z			; SOUND無効なら即リターン
+		ld	a, (SOS.SNDCTC)
+		or	a
+		ret	nz			; CTC使用中なら割り込みに任せる
+
+		; VSYNC edge detection (port $1A01 bit 7)
+		ld	bc, $1A01
+		in	a, (c)
+		and	$80
+		ld	b, a			; B = 現在のVSYNC状態 ($80 or $00)
+		ld	a, (SOS.VSYNC_PREV)
+		ld	c, a			; C = 前回の状態
+		ld	a, b
+		ld	(SOS.VSYNC_PREV), a	; 状態を保存
+		xor	c			; 前回と異なる？
+		ret	z			; 変化なし → スキップ
+		bit	7, b
+		ret	z			; VSYNC期間終了(立ち下がり) → スキップ
+		; VSYNC立ち上がりエッジ → PSG_PROC呼出し
+		jp	SND_PSG_PROC		; PSG_PROC
+#ENDIF
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LSX-Dodgers用のS-OS互換コール群
@@ -6404,6 +6614,9 @@ RSVTBL:
 	db	_s,no+104,"COLOR ",0
 	db	_s,no+105,"PCGDEF ",0
 	db	_s,no+106,"TCOLOR ",0
+#IF exists IS_LSX
+	db	_s,no+107,"SOUND ",0
+#ENDIF
 
 	db	0
 	ds	72,0
