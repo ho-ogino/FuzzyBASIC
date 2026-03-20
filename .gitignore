@@ -8,5 +8,13 @@
 /disk/work/*
 !/disk/work/README.md
 
+# Build artifacts in src/
+src/*.bin
+src/*.lst
+src/*.sym
+
+# Logs
+*.log
+
 # macOS
 .DS_Store

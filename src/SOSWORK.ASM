@@ -72,4 +72,10 @@ ER15:	DB	'Error ',0DH
 ER14:	DB	'Bad Data',0DH
 OK:	DB	'Complete !',0DH
 
+#IF exists NAME_SPACE_DEFAULT.IS_LSX
+SNDFLG:	DB	0		; $00=SOUND無効、$FF=SOUND有効
+VSYNC_PREV:	DB	0		; 前回VSYNC状態（ポーリング用）
+SNDCTC:	DB	0		; $00=非CTC、$FF=CTC使用中
+#ENDIF
+
 [NAME_SPACE_DEFAULT]
