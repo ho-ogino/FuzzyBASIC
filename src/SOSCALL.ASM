@@ -195,18 +195,16 @@ NLX:
 	POP	AF
 	RET
 
+LTNL:
+	LD	A,$0D
+	JR	LTNL1
 PRINTS:
-	PUSH	AF
 	LD	A,$20
 LTNL1:
+	PUSH	AF
 	CALL	_PRINT
 	POP	AF
 	RET
-;
-LTNL:
-	PUSH	AF
-	LD	A,$0D
-	JR	LTNL1
 
 _CSR:
 CSR:
@@ -337,7 +335,6 @@ ZPRNT2:
 	RET
 ;
 ZPRNT3:
-	PUSH	BC
 	PUSH	DE
 	PUSH	HL
 	LD	E,A
@@ -345,7 +342,6 @@ ZPRNT3:
 	CALL	SYSTEM
 	POP	HL
 	POP	DE
-	POP	BC
 	RET
 
 BELL:
@@ -542,7 +538,9 @@ INKBF:
 	INC	A
 	LD	(SUBPS+1),A
 	LD	L,A
-	LD	H,SUBBF/256
+	LD	H,0
+	LD	BC,SUBBF
+	ADD	HL,BC
 	LD	A,(HL)
 	SCF
 INKBF1:
@@ -575,21 +573,7 @@ GETKY:
 	PUSH	HL
 	LD	E,$FF
 	LD	C,$06		;INPOUT
-	CALL	SYSTEM
-	POP	HL
-	POP	DE
-	POP	BC
-	OR	A
-	RET	NZ		; キーあり → そのまま返す
-	; キーなし → _KEYDで押下中キーを確認しリピート
-	PUSH	HL
-	LD	A,(WBOOTBK+1)
-	LD	H,A
-	LD	L,$92		; _KEYDオフセット
-	LD	A,(HL)
-	POP	HL
-	OR	A		; _KEYD=0ならキー未押下
-	RET
+	JR	GETKY1
 ;
 _FLGET:
 FLGET:
@@ -1134,46 +1118,32 @@ ROLUP_LINTTB:
 
 ; 折り返し処理: Y++, LINTTB[Y]=$FF, スクロール判定
 ; 破壊: AF
+; 折り返し処理: Y++, LINTTB[Y]=$FF, スクロール判定
 WRAP_LINE:
-	PUSH	DE
-	PUSH	HL
-	LD	A,(CSRNY)
-	INC	A
-	CP	LINE
-	JR	C,.WRAP_NOSCROLL
-	CALL	ROLUP_LINTTB
-	LD	A,LINE-1
-.WRAP_NOSCROLL
-	LD	(CSRNY),A
-	; LINTTB[Y] = $FF（前行の続き）
-	LD	E,A
-	LD	D,0
-	LD	HL,LINTTB
-	ADD	HL,DE
-	LD	(HL),$FF
-	POP	HL
-	POP	DE
-	RET
-
+	LD	A,$FF
+	JR	SETLINE
 ; NEWLINE処理: Y++, LINTTB[Y]=$00（新論理行）, スクロール判定
-; 破壊: AF
 NEWLINE:
+	XOR	A
+; 共通: A=LINTTB値($FF=継続, $00=新行)
+SETLINE:
 	PUSH	DE
 	PUSH	HL
+	PUSH	AF		; マーカ退避
 	LD	A,(CSRNY)
 	INC	A
 	CP	LINE
-	JR	C,.NL_NOSCROLL
+	JR	C,.SL_NOSCROLL
 	CALL	ROLUP_LINTTB
 	LD	A,LINE-1
-.NL_NOSCROLL
+.SL_NOSCROLL
 	LD	(CSRNY),A
-	; LINTTB[Y] = $00（新論理行開始）
 	LD	E,A
 	LD	D,0
 	LD	HL,LINTTB
 	ADD	HL,DE
-	LD	(HL),$00
+	POP	AF		; マーカ復元
+	LD	(HL),A
 	POP	HL
 	POP	DE
 	RET

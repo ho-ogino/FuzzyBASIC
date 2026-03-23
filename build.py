@@ -91,7 +91,7 @@ VALID_TARGET_NAMES = tuple(sorted([*TARGETS.keys(), "all"]))
 
 DEPLOY_TARGETS = {
     "lsx": {
-        "clean_image": "LSX162b.d88",
+        "clean_image": "LSX162c.d88",
         "work_image": "FuzzyBASIC-LSX.d88",
         "zip_name": "FuzzyBASIC_v1.2L.zip",
         "d88_name": "FuzzyBASIC_v1.2L.d88",
