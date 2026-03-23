@@ -4585,6 +4585,17 @@ CURY:
 
 GETKY:
 		call	SOS._GETKY
+		or	a
+		jr	nz, _KEY
+#IF exists IS_LSX
+		; BDOS $06でキーなし → _KEYD(押下中キー)をフォールバック参照
+		push	hl
+		ld	a, (SOS.WBOOTBK+1)
+		ld	h, a
+		ld	l, $92		; _KEYDオフセット
+		ld	a, (hl)
+		pop	hl
+#ENDIF
 		jr	_KEY
 
 FLASH:
@@ -5253,7 +5264,11 @@ FUNCTBL:
 		dw	err35,err35,err35,err35
 
 		dw	err35,err35,COS,SIN
+#IF exists IS_LSX
+		dw	PAI,JOY,err35,err35
+#ELSE
 		dw	PAI,err35,err35,err35
+#ENDIF
 
 PRTTBL:
 		dw	PRCHR,PRBIN,PRBINL,PRDEC5
@@ -6229,6 +6244,25 @@ SOUND_:
 		jp	SND_SFXStop		; SFXStop
 
 ; ====================================================================================================
+; JOY(n) - ジョイスティック入力 (n=0:ポート1, n=1:ポート2)
+;   DI/EI で囲み、BGM再生中でもPSGレジスタ14/15を安全に読み取る
+; ====================================================================================================
+JOY:
+		call	SK_K
+		ld	a, l
+		cp	2
+		jp	nc, err13	; 0/1以外はエラー
+		di
+		add	a, $0E		; $0E=R14(joy1), $0F=R15(joy2)
+		ld	bc, $1C00
+		out	(c), a
+		dec	b		; BC=$1B00
+		in	l, (c)
+		ld	h, c		; H=0 (C=$00)
+		ei
+		ret
+
+; ====================================================================================================
 ; SNDPOLL - VSYNCポーリングによるサウンドドライバ呼び出し
 ;   LINED (各文実行後のBRKEYチェック直後) から呼ばれる
 ;   非CTC環境でのみ VSYNC立ち上がりエッジを検出して PSG_PROC を呼ぶ
@@ -6616,6 +6650,7 @@ RSVTBL:
 	db	_s,no+106,"TCOLOR ",0
 #IF exists IS_LSX
 	db	_s,no+107,"SOUND ",0
+	db	_f,no+70,"JOY(",0
 #ENDIF
 
 	db	0

@@ -19,11 +19,11 @@ KBFAD	DS	128
 KBFAD0:	DB	80
 KBFAD1:	DB	0
 KBFADX:	DS	80
-	DB	0
+		DB	0
 PRBF:	DS	80
 SUBPS:	DW	0
 SUBBF:
-	DS	256		;バッチファイル専用バッファ
+		DS	256		;バッチファイル専用バッファ
 
 _KBFAD:	dw	KBFAD
 
