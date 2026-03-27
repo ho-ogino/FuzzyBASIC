@@ -1,0 +1,93 @@
+{
+  "symbols": {
+    "MAGICTOP": {
+      "default": "0xB000",
+      "description": "MAGIC graphics engine",
+      "label": {"ja": "MAGIC", "en": "MAGIC"}
+    },
+    "SOUNDTOP": {
+      "default": "0xC300",
+      "description": "Sound driver (AKG/AKM)",
+      "label": {"ja": "サウンドドライバ", "en": "Sound Driver"}
+    },
+    "GPAINTTOP": {
+      "default": "0xD000",
+      "description": "Paint fill routine",
+      "label": {"ja": "ペイントライブラリ", "en": "Paint Library"}
+    }
+  },
+  "binaries": {
+    "MAGIC": {
+      "source": "../../MAGIC.ASM",
+      "rel_file": "MAGIC.REL",
+      "output_file": "MAGIC.BIN",
+      "assembler": "ailz80asm",
+      "build_args": ["-f", "-gap", "0"],
+      "groups": {
+        "SELF": {
+          "symbol": "MAGICTOP",
+          "source_pattern": "START\\s+EQU\\s+{value}",
+          "value_format": "ailz80_h"
+        }
+      }
+    },
+    "PSGAKG": {
+      "source": "../src/playerAkg_x1_wrapper.asm",
+      "rel_file": "PSGAKG.REL",
+      "output_file": "PSGAKG.BIN",
+      "assembler": "rasm",
+      "build_args": [],
+      "groups": {
+        "SELF": {"symbol": "SOUNDTOP", "define": "DRIVER_ORG"}
+      }
+    },
+    "PSGAKM": {
+      "source": "../src/playerAkm_x1_wrapper.asm",
+      "rel_file": "PSGAKM.REL",
+      "output_file": "PSGAKM.BIN",
+      "assembler": "rasm",
+      "build_args": [],
+      "groups": {
+        "SELF": {"symbol": "SOUNDTOP", "define": "DRIVER_ORG"}
+      }
+    },
+    "GPAINT": {
+      "source": "../src/gpaint.asm",
+      "rel_file": "GPAINT.REL",
+      "output_file": "GPAINT.BIN",
+      "assembler": "ailz80asm",
+      "build_args": ["-f", "-gap", "0"],
+      "groups": {
+        "SELF": {
+          "symbol": "GPAINTTOP",
+          "source_pattern": "ORG\\s+{value}",
+          "value_format": "ailz80_dollar"
+        },
+        "MAGICTOP": {
+          "symbol": "MAGICTOP",
+          "source_pattern": "MAGICTOP\\s+EQU\\s+{value}",
+          "value_format": "ailz80_dollar"
+        }
+      }
+    },
+    "FZBASIC": {
+      "source": "../src/FUZZY.ASM",
+      "rel_file": "FZBASIC.REL",
+      "output_file": "FZBASIC.COM",
+      "assembler": "ailz80asm",
+      "build_args": ["-dl", "IS_LSX=1", "ENABLE_AUTORUN=1", "-f", "-gap", "0"],
+      "groups": {
+        "MAGICTOP": {
+          "symbol": "MAGICTOP",
+          "source_pattern": "MAGICTOP\\s+EQU\\s+{value}",
+          "value_format": "ailz80_dollar"
+        },
+        "SOUNDTOP": {
+          "symbol": "SOUNDTOP",
+          "source_pattern": "SOUNDTOP\\s+EQU\\s+{value}",
+          "value_format": "ailz80_dollar"
+        }
+      }
+    }
+  }
+}
