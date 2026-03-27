@@ -75,7 +75,7 @@
       "rel_file": "FZBASIC.REL",
       "output_file": "FZBASIC.COM",
       "assembler": "ailz80asm",
-      "build_args": ["-dl", "IS_LSX=1", "-f", "-gap", "0"],
+      "build_args": ["-dl", "IS_LSX=1", "ENABLE_AUTORUN=1", "-f", "-gap", "0"],
       "groups": {
         "MAGICTOP": {
           "symbol": "MAGICTOP",
