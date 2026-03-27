@@ -20,7 +20,10 @@
 ; licence: MIT License (ArkosTracker player by Targhan/Arkos)
 ; ====================================================================================================
 
-        org #c300
+        IFNDEF DRIVER_ORG
+DRIVER_ORG = #c300
+        ENDIF
+        org DRIVER_ORG
 
 ; ----------------------------------------------------------------------------------------------------
 ; Jump table

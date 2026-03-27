@@ -70,6 +70,41 @@ SYMBOLS = {
         "NXLIN": "NXLIN",
         "JIKKOU": "JIKKOU",
     },
+    "user_hooks": {
+        "USR_A": "SMTBL",
+        "USR_B": "SMTBL",
+        "USR_C": "SMTBL",
+        "USR_D": "SMTBL",
+        "USR_E": "SMTBL",
+        "USR_F": "SMTBL",
+        "USR_G": "SMTBL",
+        "USR_H": "SMTBL",
+        "FN_A": "FUNCTBL",
+        "FN_B": "FUNCTBL",
+        "FN_C": "FUNCTBL",
+        "FN_D": "FUNCTBL",
+        "FN_E": "FUNCTBL",
+        "FN_F": "FUNCTBL",
+        "FN_G": "FUNCTBL",
+        "FN_H": "FUNCTBL",
+        "PR_A": "PRTTBL",
+        "PR_B": "PRTTBL",
+    },
+}
+
+# USR^A-H, FN^A-H, PR^A-B are computed from table base + index.
+# These are not direct SYM lookups but calculated addresses.
+# Index = (no+N) - $80 = N - 1. Token no+N dispatches to table[N-1].
+USER_HOOKS = {
+    "USR_A": ("SMTBL", 92), "USR_B": ("SMTBL", 93),
+    "USR_C": ("SMTBL", 94), "USR_D": ("SMTBL", 95),
+    "USR_E": ("SMTBL", 96), "USR_F": ("SMTBL", 97),
+    "USR_G": ("SMTBL", 98), "USR_H": ("SMTBL", 99),
+    "FN_A": ("FUNCTBL", 58), "FN_B": ("FUNCTBL", 59),
+    "FN_C": ("FUNCTBL", 60), "FN_D": ("FUNCTBL", 61),
+    "FN_E": ("FUNCTBL", 62), "FN_F": ("FUNCTBL", 63),
+    "FN_G": ("FUNCTBL", 64), "FN_H": ("FUNCTBL", 65),
+    "PR_A": ("PRTTBL", 13), "PR_B": ("PRTTBL", 14),
 }
 
 
@@ -130,7 +165,8 @@ def _sym_sha256(sym_path: Path) -> str:
     return h[:12]
 
 
-def build_addrmap(sym: dict[str, int], version: str, sym_path: Path) -> dict:
+def build_addrmap(sym: dict[str, int], version: str, sym_path: Path,
+                  allow_missing: bool = False) -> dict:
     missing = []
 
     result = {
@@ -144,20 +180,37 @@ def build_addrmap(sym: dict[str, int], version: str, sym_path: Path) -> dict:
     }
 
     for category, entries in SYMBOLS.items():
+        if category == "user_hooks":
+            continue  # Handled separately below
         cat_data = {}
         for json_key, sym_name in entries.items():
             addr = _resolve_symbol(sym, sym_name)
             if addr is None:
                 missing.append(f"{category}.{json_key} (sym: {sym_name})")
+                if allow_missing:
+                    cat_data[json_key] = None
             else:
                 cat_data[json_key] = f"0x{addr:04X}"
         result[category] = cat_data
 
-    if missing:
+    # User hooks: computed from table base + index * 2
+    hooks_data = {}
+    for hook_name, (table_name, index) in USER_HOOKS.items():
+        base = _resolve_symbol(sym, table_name)
+        if base is None:
+            missing.append(f"user_hooks.{hook_name} (table: {table_name})")
+        else:
+            hooks_data[hook_name] = f"0x{base + index * 2:04X}"
+    result["user_hooks"] = hooks_data
+
+    if missing and not allow_missing:
         raise SystemExit(
             f"[addrmap] ERROR: {len(missing)} required symbol(s) not found in SYM:\n"
             + "\n".join(f"  - {m}" for m in missing)
         )
+    if missing and allow_missing:
+        print(f"[addrmap] WARNING: {len(missing)} symbol(s) not found (set to null)",
+              file=sys.stderr)
 
     return result
 
@@ -169,11 +222,14 @@ def main():
                    help="FuzzyBASIC version (e.g. 1.2L)")
     p.add_argument("-o", "--output", help="Output JSON file (default: stdout)")
     p.add_argument("--merge", help="Merge into existing JSON file (multi-version)")
+    p.add_argument("--allow-missing", action="store_true",
+                   help="Allow missing symbols (set to null instead of error)")
     args = p.parse_args()
 
     sym_path = Path(args.sym)
     sym = parse_sym(sym_path)
-    addrmap = build_addrmap(sym, args.version, sym_path)
+    addrmap = build_addrmap(sym, args.version, sym_path,
+                            allow_missing=args.allow_missing)
 
     if args.merge:
         merge_path = Path(args.merge)

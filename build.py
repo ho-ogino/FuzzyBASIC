@@ -58,6 +58,7 @@ TARGETS = {
         ),
         description="Build the LSX-Dodgers binary.",
         extra_builds=(
+            # $C300版 (MAGIC非同居、メモリ末尾配置)
             ExtraBuild(
                 source="playerAkm_x1_wrapper.asm",
                 args=("-o", "PSGDRV_AKM", "-s"),
